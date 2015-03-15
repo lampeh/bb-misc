@@ -16,6 +16,17 @@
 .setcallreg  global.jal2
 .origin 0
 
+.macro nanosleep
+.mparam ns
+	// ns must be >= 10
+	mov		global.arg1, ((ns-10)/10)
+	qbeq	delay_loop_end, global.arg1, 0
+delay_loop:
+	sub		global.arg1, global.arg1, 1
+	qbne	delay_loop, global.arg1, 0
+delay_loop_end:
+.endm
+
 start:
 	// clear all outputs
 	mov		r30.w0, 0
@@ -548,9 +559,11 @@ shutdown_clock_wait:
 	ret
 
 clear_array:
+	// fill array with zeroes
 	// global.bbo_count0: word size
 	// global.arg0: words
 	// global.arg1: ptr
+
 	mov		global.tmpdata0, 0
 	mov		global.tmpaddr0, 0
 clear_array_loop:
@@ -678,20 +691,26 @@ shiftbits_set:
 	qba		shiftbits_clock
 
 strobe:
+	// pulse STROBE line
 	mov		global.arg1, DELAY_STROBE
 	set		r30, global.gpio_strobe
-	jal		global.jal1, delay_loop
+//	jal		global.jal1, delay_loop
+nanosleep DELAY_STROBE_NS
 	clr		r30, global.gpio_strobe
 	jmp		global.jal0
 
 oe:
+	// pulse OE line
 	mov		global.arg1, DELAY_OE
 	set		r30, global.gpio_oe
-	jal		global.jal1, delay_loop
+//	jal		global.jal1, delay_loop
+nanosleep DELAY_OE_NS
 	clr		r30, global.gpio_oe
 	jmp		global.jal0
 
 resize_mem:
+	// allocate arrays in local and shared memory
+
 	mov		global.tmpaddr0, (PRU_MEM_BASE + PRU_MEM_SIZE)
 
 	// width*16bit
@@ -760,6 +779,7 @@ resize_clear_frame1:
 
 	sub		global.tmpdata0, global.tmpdata0, 1
 	qblt	resize_clear_frame1, global.tmpdata0, 0
+
 resize_clear_frame1_end:
 	mov		global.frameptr_old, global.tmpaddr0
 
@@ -773,6 +793,7 @@ resize_clear_frame0:
 
 	sub		global.tmpdata0, global.tmpdata0, 1
 	qblt	resize_clear_frame0, global.tmpdata0, 0
+
 resize_clear_frame0_end:
 	mov		global.frameptr_new, global.tmpaddr0
 
@@ -787,6 +808,7 @@ resize_end:
 
 	jmp		global.jal0
 
+/*
 delay_loop:
 	qbge	delay_loop_end, global.arg1, 0
 	sub		global.arg1, global.arg1, 1
@@ -794,3 +816,4 @@ delay_loop:
 
 delay_loop_end:
 	jmp		global.jal1
+*/

@@ -12,6 +12,9 @@
 #define DELAY_OE 33333 // ~500µs
 #define DELAY_STROBE 2 // ~30ns
 
+#define DELAY_OE_NS (500*1000)
+#define DELAY_STROBE_NS (30)
+
 // xin/xout device ID
 #define SCRATCH_BANK0 10
 
