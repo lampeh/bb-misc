@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/time.h>
 
 #include <prussdrv.h>
 #include <pruss_intc_mapping.h>
@@ -54,8 +55,14 @@ static config_s *config;
 
 static const tpruss_intc_initdata pruss_intc_initdata = PRUSS_INTC_INITDATA;
 
+static struct timeval tv0, tv1;
+static double cur_usec;
+
 int main(const int argc, const char *argv[]) {
-	srand(time(NULL));
+gettimeofday(&tv0, NULL);
+uint32_t seed = ((tv0.tv_sec*1000000) + tv0.tv_usec) % UINT32_MAX;
+srand(seed);
+//	srand(time(NULL));
 	prussdrv_init();
 
 	long int threshold = 128;
@@ -101,10 +108,12 @@ int main(const int argc, const char *argv[]) {
 	config->data_size = config->width * config->height * config->bytes_per_pixel;
 	config->dataptr = sizeof(*config);
 
+time_t foo = time(NULL);
 ///*
 	for (uint8_t y=0; y < config->height; y++) {
 		for (uint8_t x=0; x < config->width; x++) {
-			*(pru_data+sizeof(*config)+(y*config->width)+x) = (255/config->height)*y;
+			*(pru_data+sizeof(*config)+(y*config->width)+x) = (foo + (255/config->height)*y) % 256;
+//			*(pru_data+sizeof(*config)+(y*config->width)+x) = (255/config->height)*y;
 		}
 	}
 //*/
@@ -115,12 +124,18 @@ int main(const int argc, const char *argv[]) {
 	}
 */
 
+	gettimeofday(&tv0, NULL);
+
 	// send interrupt
 	prussdrv_pru_send_event(ARM_PRU0_INTERRUPT);
 
 	// wait for incoming interrupt
 	prussdrv_pru_wait_event(PRU_EVTOUT_0);
+	gettimeofday(&tv1, NULL);
 	prussdrv_pru_clear_event(PRU_EVTOUT_0, PRU0_ARM_INTERRUPT);
+
+	cur_usec = ((tv1.tv_sec*1000000) + tv1.tv_usec) - ((tv0.tv_sec*1000000) + tv0.tv_usec);
+	printf("frame time: %.2fms\n", cur_usec / 1000);
 
 	// print first 32 bits from PRU memory
 	printf("local RAM:  0x%08x\nshared RAM: 0x%08x\n", ((uint32_t *)pru_data)[0], ((uint32_t *)pru_shared)[0]);
@@ -134,7 +149,8 @@ int main(const int argc, const char *argv[]) {
 	for (uint32_t i=0; i < config->data_size; i++) {
 		if (i % j == 0) {
 			printf("\n");
-printf ("%02d : %03d : ", i/j, (255/config->height)*(i/j));
+//printf ("%02d : %03d : ", i/j, (255/config->height)*(i/j));
+printf ("%02d : %03d : ", i/j, (unsigned int)((foo + (255/config->height)*(i/j)) % 256));
 		}
 
 		printf(BYTETOBINARYPATTERN, BYTETOBINARY(*(pru_shared + config->dataptr - 0x10000 + i)));

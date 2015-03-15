@@ -110,7 +110,7 @@ resize_ok:
 .using dithering_scope
 	mov		dithering.y, 0
 
-	// offset into frameptr0
+	// offset into frameptr_new
 	mov		global.frameptr, 0
 
 	// offset into config.dataptr
@@ -281,8 +281,8 @@ dither_next_y:
 	qbgt	dither_loop_y, dithering.y, global.height
 .leave dithering_scope
 
-	// frameptr0 now contains the new dithered bitmap
-mov config.dataptr, global.frameptr0
+	// frameptr_new now contains the new dithered bitmap
+mov config.dataptr, global.frameptr_new
 mov config.data_size, global.frameptr
 
 .using diff_scope
@@ -299,11 +299,14 @@ mov config.data_size, global.frameptr
 	mov		global.gpio_data, GPIO_ROW_DATA_BIT
 	mov		global.gpio_strobe, GPIO_ROW_STROBE_BIT
 
+	// offset into frameptr_new/old
 	mov		global.frameptr, 0
 
+	// round bits to full bytes
 	add		global.tmpdata1, global.width, 7
 	lsr		diff.x, global.tmpdata1, 3
 
+	// set first bit in row register
 	mov		global.data, 1
 
 diff_loop_y:
@@ -311,17 +314,20 @@ diff_loop_y:
 	mov		global.shift_count, 1
 	jal		global.jal0, shiftbits
 
+	// offset into dataptr0/1
 	mov		global.dataptr, 0
+
+	// clear row flags
 	and		global.flags, global.flags, (~(FLAGS_ROW0 | FLAGS_ROW1) & 0xFF)
 
 	loop	diff_last_x, diff.x
 
-	lbbo	&diff.input0.b0, global.frameptr0, global.frameptr, 1
-	lbbo	&diff.input1.b0, global.frameptr1, global.frameptr, 1
+	lbbo	&diff.input_new.b0, global.frameptr_new, global.frameptr, 1
+	lbbo	&diff.input_old.b0, global.frameptr_old, global.frameptr, 1
 
 	// cols_to_0[col] = ~((old) & ~(new));
-	not		global.tmpdata0.b0, diff.input0.b0
-	and		diff.diff_bits.b0, diff.input1.b0, global.tmpdata0.b0
+	not		global.tmpdata0.b0, diff.input_new.b0
+	and		diff.diff_bits.b0, diff.input_old.b0, global.tmpdata0.b0
 	not		diff.diff_bits.b0, diff.diff_bits.b0
 	qbeq	diff_x_store0, diff.diff_bits.b0, 0xFF
 	set		global.flags, FLAGS_ROW0_BIT
@@ -330,8 +336,8 @@ diff_x_store0:
 	sbbo	&diff.diff_bits.b0, global.dataptr0, global.dataptr, 1
 
 	// cols_to_1[col] = (~(old) & (new));
-	not		global.tmpdata0.b0, diff.input1.b0
-	and		diff.diff_bits.b0, diff.input0.b0, global.tmpdata0.b0
+	not		global.tmpdata0.b0, diff.input_old.b0
+	and		diff.diff_bits.b0, diff.input_new.b0, global.tmpdata0.b0
 	qbeq	diff_x_store1, diff.diff_bits.b0, 0x00
 	set		global.flags, FLAGS_ROW1_BIT
 
@@ -344,6 +350,7 @@ diff_x_store1:
 diff_last_x:
 	// dataptr0/1 now contain the difference pattern for this line
 
+	// skip if nothing changed
 	and		global.tmpdata0, global.flags, ((FLAGS_ROW0 | FLAGS_ROW1) & 0xFF)
 	qbeq	diff_next_y, global.tmpdata0, 0
 
@@ -354,6 +361,8 @@ diff_last_x:
 	mov		global.gpio_strobe, GPIO_COL_STROBE_BIT
 
 	qbbc	diff_to_1, global.flags, FLAGS_ROW0_BIT
+
+	// flip white pixels
 	mov		global.arg1, global.dataptr0
 	mov		global.arg0, global.width
 	call	shift_from_ram
@@ -363,12 +372,15 @@ diff_last_x:
 
 diff_to_1:
 	qbbc	diff_reload_gpio, global.flags, FLAGS_ROW1_BIT
+
+	// flip black pixels
 	mov		global.arg1, global.dataptr1
 	mov		global.arg0, global.width
 	call	shift_from_ram
 
 	mov		global.gpio_oe, GPIO_OE1_BIT
 	jal		global.jal0, oe
+
 diff_reload_gpio:
 	// load row register GPIOs
 //	xchg	SCRATCH_BANK0, &global.gpio_clk, 3
@@ -377,18 +389,18 @@ diff_reload_gpio:
 	mov		global.gpio_strobe, GPIO_ROW_STROBE_BIT
 
 diff_next_y:
+	// shift zeroes into row register
 	mov		global.data, 0
 	add		diff.y, diff.y, 1
 	qbgt	diff_loop_y, diff.y, global.height
 
-	// exchange new/old frame buffers
-	mov		global.tmpaddr0, global.frameptr0
-	mov		global.frameptr0, global.frameptr1
-	mov		global.frameptr1, global.tmpaddr0
-
+	// swap new/old frame buffers
+	mov		global.tmpaddr0, global.frameptr_new
+	mov		global.frameptr_new, global.frameptr_old
+	mov		global.frameptr_old, global.tmpaddr0
 .leave diff_scope
 
-	sbco	&config, c28, 0, SIZE(config)
+sbco	&config, c28, 0, SIZE(config)
 	qba		last
 
 .using dithering_scope
@@ -397,8 +409,9 @@ dither_store:
 	add		global.bbo_count0, dithering.bit, 6
 	lsr		global.bbo_count0, global.bbo_count0, 3
 	qbge	dither_store_end, global.bbo_count0, 0
-	sbbo	&dithering.bitmap, global.frameptr0, global.frameptr, b0
+	sbbo	&dithering.bitmap, global.frameptr_new, global.frameptr, b0
 	add		global.frameptr, global.frameptr, global.bbo_count0
+
 dither_store_end:
 	mov		dithering.bit, 0
 	mov		dithering.bitmap, 0
@@ -409,13 +422,13 @@ clear:
 	// xin/xout/xchg might use register offset in r0.b0
 	mov		global.bbo_count0, 0
 
-mov r0.w0, 0
-
+/*
 	// store col GPIOs in scratch pad
 	mov		global.gpio_clk, GPIO_COL_CLK_BIT
 	mov		global.gpio_data, GPIO_COL_DATA_BIT
 	mov		global.gpio_strobe, GPIO_COL_STROBE_BIT
 	xout	SCRATCH_BANK0, &global.gpio_clk, 3
+*/
 
 	mov		global.gpio_clk, GPIO_ROW_CLK_BIT
 	mov		global.gpio_data, GPIO_ROW_DATA_BIT
@@ -551,6 +564,10 @@ clear_array_loop_end:
 	ret
 
 shift_constant:
+	// shift out arg0 bits from global.data, repeat if arg0 > 32
+	// global.data: 32bit constant (MSB shifted out first)
+	// global.arg0: bits to shift
+
 	// % 32
 	and		global.shift_count, global.arg0, 31
 	qbeq	shift_constant_div32, global.shift_count, 0
@@ -572,26 +589,37 @@ shift_constant_end:
 	ret
 
 shift_from_ram:
+	// shift out arg0 bits from data at arg1
+	// global.arg0: bits to shift
+	// global.arg1: data pointer (last MSB shifted out first)
+
+	// round bits to full bytes
 	add		global.tmpdata1, global.arg0, 7
 	lsr		global.tmpdata1, global.tmpdata1, 3
 
+	// set pointer to end of data
 	add		global.tmpaddr0, global.arg1, global.tmpdata1
 
-	// last byte
+	// odd byte count
 	and		global.bbo_count0, global.tmpdata1, 1
 	qbeq	shift_from_ram_div16, global.bbo_count0, 0
 
+	// point to last byte
 	sub		global.tmpaddr0, global.tmpaddr0, 1
 
 	lbbo	&global.data, global.tmpaddr0, 0, 1
-// XXX: think again
+// XXX: think again - does this shift the right bits if count % 8 != 0?
 	and		global.shift_count, global.arg0, 7
 	jal		global.jal0, shiftbits
 
 shift_from_ram_div16:
+	// count / 16
 	lsr		global.tmpdata1, global.tmpdata1, 1
 	qbeq	shift_from_ram_end, global.tmpdata1, 0
 
+// XXX: think again - does this shift the right bits if count % 16 > 8?
+and global.shift_count, global.arg0, 15
+qbne shift_from_ram_loop16, global.shift_count, 0
 	mov		global.shift_count, 16
 
 shift_from_ram_loop16:
@@ -600,6 +628,7 @@ shift_from_ram_loop16:
 	jal		global.jal0, shiftbits
 
 	sub		global.tmpdata1, global.tmpdata1, 1
+sub global.arg0, global.arg0, global.shift_count
 	qblt	shift_from_ram_loop16, global.tmpdata1, 0
 
 shift_from_ram_end:
@@ -707,9 +736,9 @@ resize_frameptr:
 	// round width*1bit to full bytes
 	add		global.tmpaddr0, config.width, 7
 	lsr		global.tmpaddr0, global.tmpaddr0, 3
-	mov		global.tmpdata0, 0
 
 	// multiply by config.height
+	mov		global.tmpdata0, 0
 	loop	resize_mul_end, config.height
 	add		global.tmpdata0, global.tmpdata0, global.tmpaddr0
 
@@ -723,7 +752,7 @@ resize_mul_end:
 
 	qbge	resize_clear_frame1_end, global.tmpdata0, 0
 
-	// frameptr1: width*height*1bit bitmap (last frame)
+	// frameptr_old: width*height*1bit bitmap (last frame)
 resize_clear_frame1:
 	sub		global.tmpaddr0, global.tmpaddr0, 1
 	qbgt	oom, global.tmpaddr0, global.data
@@ -732,11 +761,11 @@ resize_clear_frame1:
 	sub		global.tmpdata0, global.tmpdata0, 1
 	qblt	resize_clear_frame1, global.tmpdata0, 0
 resize_clear_frame1_end:
-	mov		global.frameptr1, global.tmpaddr0
+	mov		global.frameptr_old, global.tmpaddr0
 
 	mov		global.tmpdata0, global.dataptr
 
-	// frameptr0: width*height*1bit bitmap (new frame)
+	// frameptr_new: width*height*1bit bitmap (new frame)
 resize_clear_frame0:
 	sub		global.tmpaddr0, global.tmpaddr0, 1
 	qbgt	oom, global.tmpaddr0, global.data
@@ -745,9 +774,9 @@ resize_clear_frame0:
 	sub		global.tmpdata0, global.tmpdata0, 1
 	qblt	resize_clear_frame0, global.tmpdata0, 0
 resize_clear_frame0_end:
-	mov		global.frameptr0, global.tmpaddr0
+	mov		global.frameptr_new, global.tmpaddr0
 
-	// OOM if dataptr+data_size > frameptr0
+	// OOM if dataptr+data_size > frameptr_new
 	add		global.tmpdata0, config.dataptr, config.data_size
 	qbgt	oom, global.tmpaddr0, global.tmpdata0
 

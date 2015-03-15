@@ -62,8 +62,8 @@
 	.u32	ditherptr0
 	.u32	ditherptr1
 
-	.u32	frameptr0
-	.u32	frameptr1
+	.u32	frameptr_new
+	.u32	frameptr_old
 
 	.u32	dataptr0
 	.u32	dataptr1
@@ -120,8 +120,8 @@
 
 	.u32	diff_bits
 
-	.u32	input0
-	.u32	input1
+	.u32	input_new
+	.u32	input_old
 .ends
 
 .struct config_s
