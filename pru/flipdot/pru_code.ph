@@ -1,3 +1,18 @@
+// static configuration
+#define GPIO_COL_CLK_BIT 0
+#define GPIO_COL_DATA_BIT 1
+#define GPIO_COL_STROBE_BIT 2
+#define GPIO_ROW_CLK_BIT 3
+#define GPIO_ROW_DATA_BIT 4
+#define GPIO_ROW_STROBE_BIT 2
+#define GPIO_OE0_BIT 6
+#define GPIO_OE1_BIT 7
+
+// Delay loop: 3 instructions @ 200MHz = ~15ns per loop
+#define DELAY_OE 33333 // ~500µs
+#define DELAY_STROBE 2 // ~30ns
+
+// xin/xout device ID
 #define SCRATCH_BANK0 10
 
 #define PRU_MEM_BASE 0
@@ -8,6 +23,7 @@
 
 #define CONFIG_VERSION 1
 
+// config.flags
 #define FLAGS_CLEAR		0b00000001
 #define FLAGS_RESET		0b00000010
 #define FLAGS_DITHER	0b00000100
@@ -18,6 +34,7 @@
 #define FLAGS_DITHER_BIT 2
 #define FLAGS_ERROR_BIT 7
 
+// global.flags
 #define FLAGS_INV		0b00000001
 #define FLAGS_ROW0		0b00000010
 #define FLAGS_ROW1		0b00000100
@@ -29,18 +46,6 @@
 #define ERROR_VERSION 1
 #define ERROR_MEM 2
 #define ERROR_OTHER 255
-
-#define GPIO_COL_CLK_BIT 0
-#define GPIO_COL_DATA_BIT 1
-#define GPIO_COL_STROBE_BIT 2
-#define GPIO_ROW_CLK_BIT 3
-#define GPIO_ROW_DATA_BIT 4
-#define GPIO_ROW_STROBE_BIT 2
-#define GPIO_OE0_BIT 6
-#define GPIO_OE1_BIT 7
-
-#define DELAY_OE 33334 // ~500µs, 3 instructions @ 200MHz
-#define DELAY_STROBE 2 // ~30ns, 3 instructions @ 200MHz
 
 #define nop mov	r0, r0
 

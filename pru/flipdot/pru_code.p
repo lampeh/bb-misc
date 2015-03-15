@@ -34,37 +34,11 @@ start:
 	mov		global.tmpaddr0, 15
 	call	shutdown_clock
 
+/*
 	// shut down UART clock
-//	mov		global.tmpaddr0, 9
-//	call	shutdown_clock
-
-/*
-	// r30[13:8] GPIO output pins occupied by eMMC interface
-	// pin_mux_sel[1] = 1: map r30[13:8] to r30[5:0] on PRU1
-	lbco	&global.tmpdata0, c4, 0x40, 4
-	set		global.tmpdata0, global.tmpdata0, 1
-	sbco	&global.tmpdata0, c4, 0x40, 4
+	mov		global.tmpaddr0, 9
+	call	shutdown_clock
 */
-
-	// enable OCP master port in SYSCFG register
-	// required for shared RAM access
-	lbco	&global.tmpdata0, c4, 0x04, 4
-	clr		global.tmpdata0, global.tmpdata0, 4
-	sbco	&global.tmpdata0, c4, 0x04, 4
-
-/*
-	// set CTPPR0[15:0] to 0x0100
-	// sets constant c28 to shared RAM base address 0x010000
-	mov		global.tmpaddr0, 0x22028
-	mov		global.tmpdata0.w0, 0x0100
-	sbbo	&global.tmpdata0.w0, global.tmpaddr0, 0, 2
-*/
-
-	// set CTPPR0[15:0] to 0x0000
-	// sets constant c28 to local RAM base address 0x000000
-	mov		global.tmpaddr0, 0x22028
-	mov		global.tmpdata0.w0, 0x0000
-	sbbo	&global.tmpdata0.w0, global.tmpaddr0, 0, 2
 
 /*
 	// DEBUG: enable cycle counter in CONTROL register
@@ -73,6 +47,26 @@ start:
 	set		global.tmpdata0, global.tmpdata0, 3
 	sbbo	&global.tmpdata0, global.tmpaddr0, 0, 4
 */
+
+	// enable OCP master port in SYSCFG register
+	// required for shared RAM access
+	lbco	&global.tmpdata0, c4, 0x04, 4
+	clr		global.tmpdata0, global.tmpdata0, 4
+	sbco	&global.tmpdata0, c4, 0x04, 4
+
+#ifdef CONFIG_IN_SHARED_MEM
+	// set CTPPR0[15:0] to 0x0100
+	// sets constant c28 to shared RAM base address 0x010000
+	mov		global.tmpaddr0, 0x22028
+	mov		global.tmpdata0.w0, 0x0100
+	sbbo	&global.tmpdata0.w0, global.tmpaddr0, 0, 2
+#else
+	// set CTPPR0[15:0] to 0x0000
+	// sets constant c28 to local RAM base address 0x000000
+	mov		global.tmpaddr0, 0x22028
+	mov		global.tmpdata0.w0, 0x0000
+	sbbo	&global.tmpdata0.w0, global.tmpaddr0, 0, 2
+#endif
 
 	// enable wakeup by interrupt 0 (PRU0)
 	mov		global.tmpaddr0, 0x22008
@@ -104,16 +98,23 @@ main_loop:
 	qblt	version_mismatch, config.width, 255
 	qblt	version_mismatch, config.height, 255
 
+	// reallocate arrays if size changed
 	mov		global.jal0, resize_ok
 	qbne	resize_mem, global.width, config.width
 	qbne	resize_mem, global.height, config.height
 
 resize_ok:
-	// TODO: check flags
+	// clear display, ignore data
 	qbbs	clear, config.flags, FLAGS_CLEAR_BIT
 
 .using dithering_scope
 	mov		dithering.y, 0
+
+	// offset into frameptr0
+	mov		global.frameptr, 0
+
+	// offset into config.dataptr
+	mov		global.dataptr, 0
 
 	// fill current line errors array with 0x0000
 	mov		global.bbo_count0, 2
@@ -121,12 +122,9 @@ resize_ok:
 	mov		global.arg1, global.ditherptr0
 	call	clear_array
 
-	mov		global.frameptr, 0
-	mov		global.dataptr, 0
-
 dither_loop_y:
+	// clear dithering struct, save and increment y
 	add		global.tmpdata1, dithering.y, 1
-
 	zero	&dithering, SIZE(dithering)
 	mov		dithering.y, global.tmpdata1
 
@@ -180,16 +178,16 @@ dither_pixels:
 	call	dither_store
 
 dither_errors:
-/*
+#ifdef DITHER_SIERRA_LITE
 	// Sierra Lite filter
 	lsr		dithering.error1, global.tmpdata1, 1 // 2/4 = 1/2
 	lsr		dithering.error2, global.tmpdata1, 2 // 1/4
-*/
-
+#else
 	// Burkes filter
 	lsr		dithering.error1, global.tmpdata1, 2 // 8/32 = 1/4
 	lsr		dithering.error2, global.tmpdata1, 3 // 4/32 = 1/8
 	lsr		dithering.error3, global.tmpdata1, 4 // 2/32 = 1/16
+#endif
 
 	// negate error values after bit shift
 	qbbc	dither_distribute, global.flags, FLAGS_INV_BIT
@@ -201,8 +199,10 @@ dither_distribute:
 	// x+1, y
 	add		dithering.forward1, dithering.forward2, dithering.error1
 
+#ifndef DITHER_SIERRA_LITE
 	// x+2, y
 	mov		dithering.forward2, dithering.error2
+#endif
 
 	// last line
 	qble	dither_next_x, dithering.y, global.height
@@ -210,11 +210,16 @@ dither_distribute:
 	// x, y+1
 	lsl		global.tmpaddr0, dithering.x, 1
 	lbbo	&global.tmpdata1, global.ditherptr1, global.tmpaddr0, 2
+#ifdef DITHER_SIERRA_LITE
+	add		global.tmpdata1, global.tmpdata1, dithering.error2
+#else
 	add		global.tmpdata1, global.tmpdata1, dithering.error1
-//	add		global.tmpdata1, global.tmpdata1, dithering.error2
+#endif
 	sbbo	&global.tmpdata1, global.ditherptr1, global.tmpaddr0, 2
 
-//qba dither_backward
+#ifdef DITHER_SIERRA_LITE
+	qba		dither_backward
+#endif
 
 	// x+1, y+1
 	add		global.tmpaddr0, dithering.x, 1
@@ -238,17 +243,21 @@ dither_backward:
 	// x-1, y+1
 	sub		global.tmpaddr0, dithering.x, 1
 	qbgt	dither_next_x, global.tmpaddr0, 0
+qbeq dither_next_x, global.tmpaddr0, global.ones
 
 	lsl		global.tmpaddr0, global.tmpaddr0, 1
 	lbbo	&global.tmpdata1, global.ditherptr1, global.tmpaddr0, 2
 	add		global.tmpdata1, global.tmpdata1, dithering.error2
 	sbbo	&global.tmpdata1, global.ditherptr1, global.tmpaddr0, 2
 
-//qba dither_next_x
+#ifdef DITHER_SIERRA_LITE
+	qba		dither_next_x
+#endif
 
 	// x-2, y+1
 	sub		global.tmpaddr0, dithering.x, 2
 	qbgt	dither_next_x, global.tmpaddr0, 0
+qbeq dither_next_x, global.tmpaddr0, global.ones
 
 	lsl		global.tmpaddr0, global.tmpaddr0, 1
 	lbbo	&global.tmpdata1, global.ditherptr1, global.tmpaddr0, 2
